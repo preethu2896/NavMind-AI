@@ -1,0 +1,37 @@
+# Environment files (contain API keys - DO NOT COMMIT)
+.env
+frontend/.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyc
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env.local
+
+# Output / logs
+output.txt
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Node modules (if any)
+node_modules/
+
+# Build artifacts
+dist/
+build/
