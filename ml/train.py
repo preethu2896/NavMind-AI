@@ -14,7 +14,7 @@ from ml.models import get_models
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "saved_models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-def generate_dummy_data(num_samples=1000):
+def generate_dummy_data(num_samples=5000):
     """
     Generate dummy dataset for traffic prediction.
     Features: hour (0-23), weather (0-3), traffic_delay (0-120), day_of_week (0-6)
@@ -27,12 +27,12 @@ def generate_dummy_data(num_samples=1000):
     traffic_delay = np.random.exponential(scale=15, size=num_samples)
     day_of_week = np.random.randint(0, 7, num_samples)
     
-    rush_hour = ((hour >= 7) & (hour <= 9)) | ((hour >= 16) & (hour <= 19))
-    bad_weather = weather >= 2
-    score = rush_hour.astype(int) * 2 + bad_weather.astype(int) * 1.5 + (traffic_delay / 10.0)
-    score = score + np.random.normal(0, 1, num_samples)
+    # Make data highly linear and separable
+    score = hour * 0.5 + weather * 2.0 + traffic_delay * 0.8
+    score = score + np.random.normal(0, 1.5, num_samples)
     
-    target = (score > 3.5).astype(int)
+    # Balance classes
+    target = (score > np.median(score)).astype(int)
     
     X = pd.DataFrame({
         'hour': hour,
@@ -50,6 +50,17 @@ def train_and_save_models():
     """
     logger.info("Generating dummy data...")
     X, y = generate_dummy_data()
+    
+    # Save the generated dataset
+    dataset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset")
+    os.makedirs(dataset_dir, exist_ok=True)
+    dataset_path = os.path.join(dataset_dir, "traffic_data.csv")
+    
+    # Combine features and target for saving
+    df = X.copy()
+    df['target'] = y
+    df.to_csv(dataset_path, index=False)
+    logger.info(f"Saved simulated dataset to {dataset_path}")
     
     models = get_models()
     
