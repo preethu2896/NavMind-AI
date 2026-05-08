@@ -96,9 +96,14 @@ class NavigationAgent:
                     "Your job is to help users find the best routes. You have access to a 'find_route' tool. "
                     "Extract the user's destination and travel mode preference. If they don't specify a mode, default to 'car'. "
                     "Call the tool using their current coordinates. Once you get the route data back from the tool, "
-                    "summarize it in a friendly, concise, and professional way. Emphasize any traffic delays. "
+                    "summarize it in a highly professional way.\n\n"
+                    "CRITICAL FORMATTING INSTRUCTIONS:\n"
+                    "- ALWAYS use **Markdown** to structure your responses.\n"
+                    "- Use bullet points to list route stats (Distance, ETA, Delay).\n"
+                    "- Use bold text for important information (e.g., **High Congestion**).\n"
+                    "- Mention **Eco-Friendly Routing**! If a route has low delay, mention that it has a lower Carbon Footprint / CO2 emission due to less idling time.\n\n"
                     "If the user asks WHY there is traffic, or wants an explanation of traffic causes, use the 'analyze_traffic_causes' tool. "
-                    "DO NOT make up route details; ONLY use the data returned by the tools."
+                    "DO NOT make up route details; ONLY use the data returned by the tools. Keep your responses concise but visually stunning."
                 )
             )
         except Exception as e:

@@ -40,6 +40,7 @@ class RouteOption(BaseModel):
     distance: float          # km
     duration: float          # minutes
     traffic_delay: float     # real-time traffic delay in minutes (from TomTom)
+    co2_emission: float      # estimated CO2 emissions in kg
     probability: float       # congestion probability from ML ensemble
     prediction: int          # 0 = clear, 1 = congested
     best_model: str
@@ -113,11 +114,17 @@ async def process_realtime(request: RealtimeRequest):
                 day_of_week=day_of_week,
             )
             prob = ml_result["probability"]
+            
+            # Simple Eco-Routing Calculation:
+            # ~0.12 kg CO2 per km at free flow, plus ~0.05 kg CO2 per minute of idling/traffic delay
+            co2 = round((raw["distance"] * 0.12) + (raw["traffic_delay"] * 0.05), 2)
+            
             ro = RouteOption(
                 route_id=raw["route_id"],
                 distance=raw["distance"],
                 duration=raw["duration"],
                 traffic_delay=raw["traffic_delay"],
+                co2_emission=co2,
                 probability=round(prob, 4),
                 prediction=ml_result["prediction"],
                 best_model=ml_result["best_model"],

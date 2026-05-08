@@ -1926,3 +1926,18 @@ body.dark-mode .agent-chat-send {
     box-shadow: 0 0 0 6px rgba(220, 38, 38, 0);
   }
 }
+
+/* ── 3D Map Tilt during Navigation ───────────────────────────────────────── */
+.navigating-3d {
+  transform: rotateX(45deg) translateY(10px);
+  transform-origin: bottom center;
+  box-shadow: 0 30px 50px rgba(0, 0, 0, 0.4);
+  border-radius: 12px;
+  transition: all 1.2s cubic-bezier(0.25, 1, 0.5, 1);
+  perspective: 1000px;
+  z-index: 10;
+}
+
+.map-wrapper {
+  transition: all 1.2s cubic-bezier(0.25, 1, 0.5, 1);
+}

@@ -30,6 +30,7 @@ import {
   Footprints,
   Bookmark,
   Layers,
+  Leaf,
   CloudRain,
   MessageSquare,
   X,
@@ -54,7 +55,10 @@ import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
 import markerIcon from "leaflet/dist/images/marker-icon.png";
 import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import "./App.css";
+import ReactMarkdown from "react-markdown";
 import StreetPreview from "./StreetPreview.jsx";
+import DashcamSimulation from "./DashcamSimulation.jsx";
+import EcoProfile from "./EcoProfile.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -272,6 +276,13 @@ function RouteComparisonPanel({
                     </span>
                   </div>
                 </div>
+                <div className="rc-stat">
+                  <span className="rc-stat__icon" style={{color: "#10b981"}}><Leaf size={14} /></span>
+                  <div className="rc-stat__body">
+                    <span className="rc-stat__label">Est. CO2</span>
+                    <span className="rc-stat__value" style={{color: "#10b981"}}>{r.co2_emission} kg</span>
+                  </div>
+                </div>
                 <div
                   className="rc-stat"
                   style={{
@@ -372,7 +383,86 @@ function MapInteractionEnabler() {
   return null;
 }
 
+function FleetSimulator({ routeOptions, isEnabled }) {
+  const [fleetPositions, setFleetPositions] = useState([]);
+
+  useEffect(() => {
+    if (!isEnabled || !routeOptions) {
+      setFleetPositions([]);
+      return;
+    }
+
+    const fleet = routeOptions.map((r, i) => ({
+      id: `fleet-${i}`,
+      geometry: r.geometry,
+      progress: Math.floor(Math.random() * (r.geometry.length / 2)),
+      color: ROUTE_META[i % ROUTE_META.length]?.color || "#ffffff",
+      speed: 0.2 + Math.random() * 0.3
+    }));
+
+    let animationFrame;
+    let lastTime = Date.now();
+
+    const animate = () => {
+      const now = Date.now();
+      const dt = now - lastTime;
+      if (dt > 50) {
+        lastTime = now;
+        setFleetPositions(prev => {
+          if (prev.length === 0) return fleet;
+          return prev.map(f => {
+            let nextProgress = f.progress + f.speed;
+            if (nextProgress >= f.geometry.length - 1) {
+              nextProgress = 0;
+            }
+            return { ...f, progress: nextProgress };
+          });
+        });
+      }
+      animationFrame = requestAnimationFrame(animate);
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [isEnabled, routeOptions]);
+
+  if (!isEnabled || fleetPositions.length === 0) return null;
+
+  return (
+    <>
+      {fleetPositions.map(f => {
+        const floorIdx = Math.floor(f.progress);
+        const ceilIdx = Math.min(Math.ceil(f.progress), f.geometry.length - 1);
+        const ratio = f.progress - floorIdx;
+        const pt1 = f.geometry[floorIdx];
+        const pt2 = f.geometry[ceilIdx];
+        if (!pt1 || !pt2) return null;
+        
+        const lng = pt1[0] + (pt2[0] - pt1[0]) * ratio;
+        const lat = pt1[1] + (pt2[1] - pt1[1]) * ratio;
+
+        return (
+          <CircleMarker
+            key={f.id}
+            center={[lat, lng]}
+            radius={7}
+            pathOptions={{ fillColor: f.color, color: "#fff", weight: 2, fillOpacity: 1 }}
+          >
+            <Popup>
+              <strong>🚚 Fleet Unit {f.id.replace('fleet-', '')}</strong><br/>
+              Status: Active Route
+            </Popup>
+          </CircleMarker>
+        );
+      })}
+    </>
+  );
+}
+
 function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
+  const [showIncidents, setShowIncidents] = useState(false);
+  const [cityPlannerMode, setCityPlannerMode] = useState(false);
+  const TOMTOM_API_KEY = import.meta.env.VITE_TOMTOM_API_KEY || "quMDWPqrTCCd5Mbleyy3rTlJFkQaHYoH";
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
   const [currentSpeed, setCurrentSpeed] = useState(0); // in km/h
@@ -435,6 +525,24 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
               }
               lastSpokenRef.current = now;
             }
+          }
+
+
+          // Navigation logic here...
+          
+          if (!spokenInstructionsRef.current.has('co2-added')) {
+             spokenInstructionsRef.current.add('co2-added');
+             // Add CO2 savings logic
+             if (routeOptions && routeOptions.length > 0) {
+               const activeRoute = routeOptions.find((r) => r.route_id === activeRouteId) ?? routeOptions[0];
+               // Assume they save CO2 if they navigate using AI
+               const worstCo2 = Math.max(...routeOptions.map(r => r.co2_emission));
+               const saved = Math.max(0, worstCo2 - activeRoute.co2_emission);
+               const toAdd = saved > 0 ? saved : activeRoute.co2_emission * 0.1; // Add baseline saving if taking AI route
+               
+               const event = new CustomEvent('addCo2', { detail: toAdd });
+               window.dispatchEvent(event);
+             }
           }
 
           // Voice Navigation Check
@@ -504,12 +612,38 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
         <h2 style={{ margin: 0, padding: 0, border: "none" }}>
           <MapPin size={20} /> Interactive Route Map
         </h2>
-        <button
-          onClick={toggleNavigation}
-          className={`btn-start-nav ${isNavigating ? "active" : ""}`}
-        >
-          {isNavigating ? "🛑 Stop Navigation" : "🧭 Start Navigation"}
-        </button>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            onClick={() => setShowIncidents(!showIncidents)}
+            className={`btn-start-nav ${showIncidents ? "active" : ""}`}
+            style={{ 
+              background: showIncidents ? "var(--primary-color)" : "transparent", 
+              color: showIncidents ? "white" : "var(--primary-color)", 
+              border: "1px solid var(--primary-color)" 
+            }}
+          >
+            <Layers size={16} style={{ display: "inline", marginRight: 6 }} />
+            {showIncidents ? "Incidents On" : "Incidents Off"}
+          </button>
+          <button
+            onClick={() => setCityPlannerMode(!cityPlannerMode)}
+            className={`btn-start-nav ${cityPlannerMode ? "active" : ""}`}
+            style={{ 
+              background: cityPlannerMode ? "var(--primary-color)" : "transparent", 
+              color: cityPlannerMode ? "white" : "var(--primary-color)", 
+              border: "1px solid var(--primary-color)" 
+            }}
+          >
+            <MapPin size={16} style={{ display: "inline", marginRight: 6 }} />
+            {cityPlannerMode ? "City Planner On" : "City Planner Off"}
+          </button>
+          <button
+            onClick={toggleNavigation}
+            className={`btn-start-nav ${isNavigating ? "active" : ""}`}
+          >
+            {isNavigating ? "🛑 Stop Navigation" : "🧭 Start Navigation"}
+          </button>
+        </div>
       </div>
 
       {isNavigating && (
@@ -563,6 +697,8 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
               </span>
             </div>
           )}
+          
+          <DashcamSimulation />
         </div>
       )}
 
@@ -590,7 +726,7 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
         })}
       </div>
 
-      <div className="map-wrapper">
+      <div className={`map-wrapper ${isNavigating ? 'navigating-3d' : ''}`}>
         <MapContainer
           scrollWheelZoom={false}
           zoomControl={true}
@@ -598,14 +734,21 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
         >
           <MapInteractionEnabler />
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; TomTom'
+            url={`https://api.tomtom.com/map/1/tile/basic/night/{z}/{x}/{y}.png?key=${TOMTOM_API_KEY}`}
           />
+          {showIncidents && (
+            <TileLayer
+              url={`https://api.tomtom.com/traffic/map/4/tile/incidents/s3/{z}/{x}/{y}.png?key=${TOMTOM_API_KEY}`}
+              opacity={0.8}
+            />
+          )}
           <FitBounds positions={activePositions} />
           <LiveLocationUpdater
             livePosition={livePosition}
             isNavigating={isNavigating}
           />
+          <FleetSimulator isEnabled={cityPlannerMode} routeOptions={routeOptions} />
 
           {/* Draw inactive routes first, active route last to ensure it's on top */}
           {[...routeOptions]
@@ -707,7 +850,7 @@ function AutocompleteInput({
       try {
         setError(null);
         const res = await fetch(
-          `https://api.tomtom.com/search/2/search/${encodeURIComponent(value)}.json?key=${TOMTOM_API_KEY}&limit=5`,
+          `https://api.tomtom.com/search/2/search/${encodeURIComponent(value)}.json?key=${TOMTOM_API_KEY}&limit=8&typeahead=true&minFuzzyLevel=1&maxFuzzyLevel=2`,
         );
 
         if (!res.ok) {
@@ -846,6 +989,31 @@ function App() {
       return [];
     }
   });
+
+  const [totalCO2Saved, setTotalCO2Saved] = useState(() => {
+    try {
+      return parseFloat(localStorage.getItem("totalCO2Saved")) || 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    const handleAddCo2 = (e) => {
+      setTotalCO2Saved(prev => {
+        const next = prev + e.detail;
+        localStorage.setItem("totalCO2Saved", next);
+        return next;
+      });
+    };
+    window.addEventListener('addCo2', handleAddCo2);
+    return () => window.removeEventListener('addCo2', handleAddCo2);
+  }, []);
+
+  const resetCo2 = () => {
+    setTotalCO2Saved(0);
+    localStorage.setItem("totalCO2Saved", 0);
+  };
 
   const ORS_API_KEY =
     import.meta.env.VITE_ORS_API_KEY ||
@@ -1309,6 +1477,8 @@ function App() {
               </div>
             </div>
           )}
+
+          <EcoProfile co2Saved={totalCO2Saved} onReset={resetCo2} />
         </section>
 
         {/* ── RESULTS GRID ── */}
@@ -1652,7 +1822,7 @@ function App() {
           <div className="agent-chat-messages">
             {chatMessages.map((msg, idx) => (
               <div key={idx} className={`chat-msg chat-msg--${msg.sender}`}>
-                {msg.text}
+                <ReactMarkdown>{msg.text}</ReactMarkdown>
                 {msg.route_data && (
                   <div
                     className="chat-msg--agent-route"
