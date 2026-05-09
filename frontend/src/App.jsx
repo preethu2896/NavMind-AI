@@ -57,8 +57,72 @@ import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import "./App.css";
 import ReactMarkdown from "react-markdown";
 import StreetPreview from "./StreetPreview.jsx";
-import DashcamSimulation from "./DashcamSimulation.jsx";
 import EcoProfile from "./EcoProfile.jsx";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Voice Synthesis Helper (Nova)
+// ─────────────────────────────────────────────────────────────────────────────
+
+if ('speechSynthesis' in window) {
+  // Trigger voice loading
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+  };
+}
+
+const speakAsNova = (text) => {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel(); // Stop any current speech
+  
+  const utterance = new SpeechSynthesisUtterance(text);
+  const voices = window.speechSynthesis.getVoices();
+  
+  // Look for known high-quality female English voices (Online Neural voices sound like Siri)
+  const preferredNames = ["Microsoft Aria Online", "Microsoft Jenny Online", "Google US English", "Samantha", "Victoria", "Karen", "Microsoft Zira"];
+  let selectedVoice = voices.find(v => preferredNames.some(name => v.name.includes(name)));
+  
+  // Fallback heuristics
+  if (!selectedVoice) {
+    selectedVoice = voices.find(v => v.lang.startsWith('en') && (v.name.toLowerCase().includes('female') || v.name.toLowerCase().includes('woman')));
+  }
+  if (!selectedVoice) {
+    selectedVoice = voices.find(v => v.lang === 'en-US' || v.lang === 'en-GB');
+  }
+  
+  if (selectedVoice) {
+    utterance.voice = selectedVoice;
+  }
+  
+  // Adjust pitch and rate to sound more natural and dynamic
+  utterance.pitch = 1.15;
+  utterance.rate = 1.05;
+  
+  // Prevent feedback loops: mute recognition while speaking
+  window.isNovaSpeaking = true;
+  utterance.onstart = () => { window.isNovaSpeaking = true; };
+  utterance.onend = () => { window.isNovaSpeaking = false; };
+  utterance.onerror = () => { window.isNovaSpeaking = false; };
+  
+  window.speechSynthesis.speak(utterance);
+};
+
+const stripMarkdownForSpeech = (text) => {
+  if (!text) return "";
+  return text
+    // Replace list items with periods for natural pausing
+    .replace(/(^|\n)\s*[-*+]\s/g, ". ")
+    // Remove bold/italic asterisks, underscores, tildes, backticks
+    .replace(/[*_~`]/g, "")
+    // Remove headers
+    .replace(/#+\s/g, "")
+    // Remove markdown links but keep the text
+    .replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1")
+    // Normalize multiple spaces and multiple periods
+    .replace(/\s+/g, " ")
+    .replace(/\.{2,}/g, ". ")
+    .trim();
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -111,45 +175,74 @@ function FitBounds({ positions }) {
 // AI Recommendation Message
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AIRecommendationMessage({
-  routeOptions,
-  recommendedId,
-  rerouteAdvice,
-}) {
+function AIRecommendationMessage({ routeOptions, recommendedId, rerouteAdvice }) {
   if (!routeOptions || routeOptions.length === 0) return null;
 
-  const recRoute =
-    routeOptions.find((r) => r.route_id === recommendedId) ?? routeOptions[0];
+  const recRoute = routeOptions.find((r) => r.route_id === recommendedId) ?? routeOptions[0];
   const recIdx = routeOptions.indexOf(recRoute);
   const recMeta = ROUTE_META[recIdx] ?? ROUTE_META[0];
-  const recLabel = recMeta.label;
   const riskLevel = getRiskLevel(recRoute.probability);
   const riskCfg = RISK_CONFIG[riskLevel];
-
-  // Build the human-readable message
   const isReroute = rerouteAdvice?.reroute_advised;
   const improvement = rerouteAdvice?.improvement ?? 0;
-
-  const message = isReroute
-    ? `AI recommends ${recLabel} to avoid congestion — ${(improvement * 100).toFixed(0)}% lower risk`
-    : `AI recommends ${recLabel} as your optimal route`;
+  const riskColors = { low: "#059669", medium: "#d97706", high: "#dc2626" };
+  const riskColor = riskColors[riskLevel];
 
   return (
     <div
-      className={`ai-recommendation-msg ${isReroute ? "ai-recommendation-msg--urgent" : "ai-recommendation-msg--default"}`}
-      role="status"
-      aria-live="polite"
+      style={{
+        background: `linear-gradient(135deg, ${recMeta.color}18 0%, ${recMeta.color}06 100%)`,
+        border: `1px solid ${recMeta.color}40`,
+        borderRadius: 14,
+        padding: "18px 20px",
+        display: "flex",
+        alignItems: "center",
+        gap: 16,
+        flexWrap: "wrap",
+        gridColumn: "1 / -1",
+        animation: "fadeInUp 0.4s ease",
+      }}
+      role="status" aria-live="polite"
     >
-      <div className="ai-rec__icon-wrap">
-        <Zap size={20} />
+      {/* Nova AI badge */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
+        padding: "8px 14px", borderRadius: 999,
+        background: `${recMeta.color}22`, border: `1px solid ${recMeta.color}50`,
+      }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: recMeta.color, animation: "pulse 1.5s infinite" }} />
+        <Zap size={15} color={recMeta.color} />
+        <span style={{ fontWeight: 700, fontSize: "0.82rem", color: recMeta.color }}>Nova AI</span>
       </div>
-      <div className="ai-rec__content">
-        <span className="ai-rec__text">{message}</span>
-        <span className={`risk-pill ${riskCfg.cls}`}>
-          {riskCfg.icon} {riskCfg.label} ·{" "}
-          {(recRoute.probability * 100).toFixed(0)}%
-        </span>
+
+      {/* Message */}
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-color)", marginBottom: 3 }}>
+          {isReroute
+            ? `🔄 Rerouting to ${recMeta.label} — ${(improvement * 100).toFixed(0)}% lower congestion risk`
+            : `✨ ${recMeta.label} is your optimal route`}
+        </div>
+        <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+          {recRoute.distance} km &bull; {recRoute.duration} min drive &bull; +{recRoute.traffic_delay} min delay
+        </div>
       </div>
+
+      {/* Risk pill */}
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0,
+        padding: "8px 16px", borderRadius: 10,
+        background: `${riskColor}12`, border: `1px solid ${riskColor}35`,
+      }}>
+        <span style={{ fontSize: "1.1rem", fontWeight: 800, color: riskColor }}>{(recRoute.probability * 100).toFixed(0)}%</span>
+        <span style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>Risk</span>
+      </div>
+
+      {/* Route colour chip */}
+      <div style={{
+        width: 12, height: 40, borderRadius: 6,
+        background: `linear-gradient(180deg, ${recMeta.color}, ${recMeta.color}66)`,
+        flexShrink: 0,
+      }} />
     </div>
   );
 }
@@ -171,24 +264,18 @@ function RouteComparisonPanel({
   const WEATHER_EMOJI = { sunny: "☀️", cloudy: "☁️", rainy: "🌧️" };
   const weatherIcon = WEATHER_EMOJI[weather] ?? "🌡️";
 
+  const maxEta = Math.max(...routeOptions.map(r => r.duration + r.traffic_delay));
+
   return (
     <section
       className="card route-comparison-panel full-width"
       aria-label="Route comparison"
     >
-      <h2>
-        <Route size={20} /> Route Options
+      <h2 style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <Route size={20} color="var(--primary-color)" /> Route Options
         {weather && (
-          <span
-            style={{
-              fontSize: "0.78rem",
-              fontWeight: 400,
-              marginLeft: 12,
-              opacity: 0.7,
-            }}
-          >
-            {weatherIcon} Live weather:{" "}
-            <strong style={{ textTransform: "capitalize" }}>{weather}</strong>
+          <span style={{ fontSize: "0.78rem", fontWeight: 400, marginLeft: "auto", opacity: 0.7 }}>
+            {weatherIcon} <strong style={{ textTransform: "capitalize" }}>{weather}</strong>
           </span>
         )}
       </h2>
@@ -200,48 +287,41 @@ function RouteComparisonPanel({
           const isRecommended = r.route_id === recommendedId;
           const riskKey = getRiskLevel(r.probability);
           const riskCfg = RISK_CONFIG[riskKey];
-          const isBest = isRecommended;
-          const totalEta = (r.duration + r.traffic_delay).toFixed(1);
+          const totalEta = (r.duration + r.traffic_delay);
+          const etaPct = ((totalEta / maxEta) * 100).toFixed(0);
+          const riskColors = { low: "#059669", medium: "#d97706", high: "#dc2626" };
+          const riskColor = riskColors[riskKey];
 
           return (
             <div
               key={r.route_id}
-              className={[
-                "rc-card",
-                isActive ? "rc-card--active" : "",
-                isBest ? "rc-card--best" : "",
-              ].join(" ")}
-              style={{ "--rc-color": meta.color }}
+              className={["rc-card", isActive ? "rc-card--active" : "", isRecommended ? "rc-card--best" : ""].join(" ")}
+              style={{ "--rc-color": meta.color, position: "relative", overflow: "hidden" }}
               onClick={() => onSelect(r.route_id)}
-              role="button"
-              tabIndex={0}
+              role="button" tabIndex={0}
               onKeyDown={(e) => e.key === "Enter" && onSelect(r.route_id)}
               aria-pressed={isActive}
             >
-              {/* ── Top strip ── */}
-              <div
-                className="rc-card__top-strip"
-                style={{ background: meta.color }}
-              />
+              {/* Coloured glow top accent */}
+              <div style={{
+                position: "absolute", top: 0, left: 0, right: 0, height: 3,
+                background: `linear-gradient(90deg, ${meta.color}, ${meta.color}88)`,
+                borderRadius: "12px 12px 0 0",
+              }} />
 
-              {/* ── Header ── */}
-              <div className="rc-card__header">
+              {/* Header */}
+              <div className="rc-card__header" style={{ marginTop: 8 }}>
                 <div className="rc-card__title-row">
-                  <span
-                    className="rc-card__color-dot"
-                    style={{ background: meta.color }}
-                  />
+                  <span className="rc-card__color-dot" style={{ background: meta.color }} />
                   <span className="rc-card__label">{meta.label}</span>
                 </div>
                 <div className="rc-card__badges">
-                  {isBest && <span className="badge badge--best">★ Best</span>}
-                  <span className={`risk-pill ${riskCfg.cls}`}>
-                    {riskCfg.icon} {riskCfg.label}
-                  </span>
+                  {isRecommended && <span className="badge badge--best">★ AI Pick</span>}
+                  <span className={`risk-pill ${riskCfg.cls}`}>{riskCfg.icon} {riskCfg.label}</span>
                 </div>
               </div>
 
-              {/* ── Stats ── */}
+              {/* Primary stats grid */}
               <div className="rc-card__stats">
                 <div className="rc-stat">
                   <span className="rc-stat__icon">📍</span>
@@ -261,55 +341,41 @@ function RouteComparisonPanel({
                   <span className="rc-stat__icon">🚦</span>
                   <div className="rc-stat__body">
                     <span className="rc-stat__label">Traffic Delay</span>
-                    <span
-                      className="rc-stat__value"
-                      style={{
-                        color:
-                          r.traffic_delay > 15
-                            ? "#ef4444"
-                            : r.traffic_delay > 5
-                              ? "#f59e0b"
-                              : "#22c55e",
-                      }}
-                    >
+                    <span className="rc-stat__value" style={{ color: r.traffic_delay > 15 ? "#ef4444" : r.traffic_delay > 5 ? "#f59e0b" : "#22c55e" }}>
                       +{r.traffic_delay} min
                     </span>
                   </div>
                 </div>
                 <div className="rc-stat">
-                  <span className="rc-stat__icon" style={{color: "#10b981"}}><Leaf size={14} /></span>
+                  <span className="rc-stat__icon" style={{ color: "#10b981" }}><Leaf size={14} /></span>
                   <div className="rc-stat__body">
-                    <span className="rc-stat__label">Est. CO2</span>
-                    <span className="rc-stat__value" style={{color: "#10b981"}}>{r.co2_emission} kg</span>
-                  </div>
-                </div>
-                <div
-                  className="rc-stat"
-                  style={{
-                    gridColumn: "1 / -1",
-                    borderTop: "1px solid rgba(255,255,255,0.07)",
-                    paddingTop: 8,
-                    marginTop: 4,
-                  }}
-                >
-                  <span className="rc-stat__icon">🕒</span>
-                  <div className="rc-stat__body">
-                    <span className="rc-stat__label">Total ETA</span>
-                    <span
-                      className="rc-stat__value"
-                      style={{ fontWeight: 700, fontSize: "1rem" }}
-                    >
-                      {totalEta} min
-                    </span>
+                    <span className="rc-stat__label">Est. CO₂</span>
+                    <span className="rc-stat__value" style={{ color: "#10b981" }}>{r.co2_emission} kg</span>
                   </div>
                 </div>
               </div>
 
-              {/* ── Congestion bar ── */}
+              {/* ETA comparison bar */}
+              <div style={{ padding: "0 4px", marginTop: 6, marginBottom: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 5 }}>
+                  <span>Total ETA</span>
+                  <strong style={{ color: "var(--text-color)" }}>{totalEta.toFixed(1)} min</strong>
+                </div>
+                <div style={{ height: 8, borderRadius: 6, background: "var(--border-color)" }}>
+                  <div style={{
+                    height: "100%", borderRadius: 6,
+                    width: `${etaPct}%`,
+                    background: `linear-gradient(90deg, ${meta.color}, ${meta.color}bb)`,
+                    transition: "width 1s ease",
+                  }} />
+                </div>
+              </div>
+
+              {/* Congestion risk bar */}
               <div className="rc-card__risk-bar-wrap">
                 <div className="rc-card__risk-bar-label">
-                  <span>Congestion risk</span>
-                  <strong>{(r.probability * 100).toFixed(0)}%</strong>
+                  <span>Congestion Risk</span>
+                  <strong style={{ color: riskColor }}>{(r.probability * 100).toFixed(0)}%</strong>
                 </div>
                 <div className="rc-card__risk-bar-track">
                   <div
@@ -319,23 +385,19 @@ function RouteComparisonPanel({
                 </div>
               </div>
 
-              {/* ── Footer ── */}
+              {/* Footer */}
               <div className="rc-card__footer">
-                <span className="rc-card__model">
-                  via {r.best_model?.replace(/_/g, " ")}
+                <span className="rc-card__model" style={{ fontFamily: "monospace", fontSize: "0.7rem" }}>
+                  {r.best_model?.replace(/_/g, " ")}
                 </span>
                 <button
                   className={`btn-switch-route ${isActive ? "btn-switch-route--active" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(r.route_id);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); onSelect(r.route_id); }}
                   aria-label={`Switch to ${meta.label}`}
+                  style={isActive ? { background: meta.color, border: `1px solid ${meta.color}` } : {}}
                 >
-                  {isActive ? "✓ Active" : "Switch Route"}
-                  {!isActive && (
-                    <ArrowRight size={13} style={{ marginLeft: 4 }} />
-                  )}
+                  {isActive ? "✓ Active" : "Select"}
+                  {!isActive && <ArrowRight size={13} style={{ marginLeft: 4 }} />}
                 </button>
               </div>
             </div>
@@ -343,10 +405,10 @@ function RouteComparisonPanel({
         })}
       </div>
 
-      {/* ── AI decision reason ── */}
+      {/* AI decision reason */}
       {rerouteAdvice?.reason && (
-        <div className="reroute-reason">
-          <Zap size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+        <div className="reroute-reason" style={{ marginTop: 16 }}>
+          <Zap size={14} style={{ flexShrink: 0, marginTop: 2, color: "var(--primary-color)" }} />
           <span>{rerouteAdvice.reason}</span>
         </div>
       )}
@@ -463,6 +525,7 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
   const [showIncidents, setShowIncidents] = useState(false);
   const [cityPlannerMode, setCityPlannerMode] = useState(false);
   const TOMTOM_API_KEY = import.meta.env.VITE_TOMTOM_API_KEY || "quMDWPqrTCCd5Mbleyy3rTlJFkQaHYoH";
+  const OWM_API_KEY = import.meta.env.VITE_OPENWEATHER_API_KEY || "bd2853ec01fa4d04454a1f4d8b963255";
   const [isNavigating, setIsNavigating] = useState(false);
   const [livePosition, setLivePosition] = useState(null);
   const [currentSpeed, setCurrentSpeed] = useState(0); // in km/h
@@ -597,51 +660,62 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
   return (
     <section
       className="card map-panel full-width"
-      style={{ position: "relative" }}
+      style={{ position: "relative", padding: 0, overflow: "hidden" }}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 12,
-          borderBottom: "1px solid var(--border-color)",
-          paddingBottom: 12,
-        }}
-      >
-        <h2 style={{ margin: 0, padding: 0, border: "none" }}>
-          <MapPin size={20} /> Interactive Route Map
+      {/* Premium Map Header */}
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "14px 18px",
+        background: "linear-gradient(135deg, rgba(79,70,229,0.08), rgba(124,58,237,0.04))",
+        borderBottom: "1px solid var(--border-color)",
+      }}>
+        <h2 style={{ margin: 0, padding: 0, border: "none", display: "flex", alignItems: "center", gap: 8 }}>
+          <MapPin size={20} color="var(--primary-color)" />
+          <span>Interactive Route Map</span>
+          {isNavigating && (
+            <span style={{ fontSize: "0.68rem", fontWeight: 700, padding: "2px 10px", borderRadius: 999, background: "rgba(220,38,38,0.1)", color: "#dc2626", border: "1px solid rgba(220,38,38,0.3)", letterSpacing: "0.08em" }}>
+              ● LIVE
+            </span>
+          )}
         </h2>
-        <div style={{ display: "flex", gap: "10px" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={() => setShowIncidents(!showIncidents)}
-            className={`btn-start-nav ${showIncidents ? "active" : ""}`}
-            style={{ 
-              background: showIncidents ? "var(--primary-color)" : "transparent", 
-              color: showIncidents ? "white" : "var(--primary-color)", 
-              border: "1px solid var(--primary-color)" 
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "7px 14px",
+              borderRadius: 999, fontSize: "0.78rem", fontWeight: 600, cursor: "pointer",
+              background: showIncidents ? "var(--primary-color)" : "transparent",
+              color: showIncidents ? "white" : "var(--primary-color)",
+              border: `1px solid var(--primary-color)`, transition: "all 0.2s",
             }}
           >
-            <Layers size={16} style={{ display: "inline", marginRight: 6 }} />
-            {showIncidents ? "Incidents On" : "Incidents Off"}
+            <Layers size={14} />
+            {showIncidents ? "Incidents On" : "Incidents"}
           </button>
           <button
             onClick={() => setCityPlannerMode(!cityPlannerMode)}
-            className={`btn-start-nav ${cityPlannerMode ? "active" : ""}`}
-            style={{ 
-              background: cityPlannerMode ? "var(--primary-color)" : "transparent", 
-              color: cityPlannerMode ? "white" : "var(--primary-color)", 
-              border: "1px solid var(--primary-color)" 
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "7px 14px",
+              borderRadius: 999, fontSize: "0.78rem", fontWeight: 600, cursor: "pointer",
+              background: cityPlannerMode ? "#7c3aed" : "transparent",
+              color: cityPlannerMode ? "white" : "#7c3aed",
+              border: `1px solid #7c3aed`, transition: "all 0.2s",
             }}
           >
-            <MapPin size={16} style={{ display: "inline", marginRight: 6 }} />
-            {cityPlannerMode ? "City Planner On" : "City Planner Off"}
+            <MapPin size={14} />
+            {cityPlannerMode ? "Fleet Mode On" : "Fleet Mode"}
           </button>
           <button
             onClick={toggleNavigation}
-            className={`btn-start-nav ${isNavigating ? "active" : ""}`}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "7px 16px",
+              borderRadius: 999, fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
+              background: isNavigating ? "#dc2626" : "linear-gradient(135deg, var(--primary-color), #7c3aed)",
+              color: "white", border: "none", transition: "all 0.2s",
+              boxShadow: isNavigating ? "0 0 12px rgba(220,38,38,0.4)" : "0 0 12px rgba(79,70,229,0.3)",
+            }}
           >
-            {isNavigating ? "🛑 Stop Navigation" : "🧭 Start Navigation"}
+            {isNavigating ? "🛑 Stop" : "🧭 Navigate"}
           </button>
         </div>
       </div>
@@ -697,8 +771,6 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
               </span>
             </div>
           )}
-          
-          <DashcamSimulation />
         </div>
       )}
 
@@ -726,7 +798,7 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
         })}
       </div>
 
-      <div className={`map-wrapper ${isNavigating ? 'navigating-3d' : ''}`}>
+      <div className="map-wrapper">
         <MapContainer
           scrollWheelZoom={false}
           zoomControl={true}
@@ -743,6 +815,10 @@ function MapView({ routeOptions, activeRouteId, onRouteSelect }) {
               opacity={0.8}
             />
           )}
+          <TileLayer
+            url={`https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=${OWM_API_KEY}`}
+            opacity={0.7}
+          />
           <FitBounds positions={activePositions} />
           <LiveLocationUpdater
             livePosition={livePosition}
@@ -975,8 +1051,15 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const coordsRef = useRef(null);
+
   const [currentLocationText, setCurrentLocationText] = useState("");
   const [currentCoords, setCurrentCoords] = useState(null);
+
+  // Keep coordsRef synced with currentCoords for the continuous voice listener closure
+  useEffect(() => {
+    coordsRef.current = currentCoords;
+  }, [currentCoords]);
 
   const [destinationText, setDestinationText] = useState("");
   const [destinationCoords, setDestinationCoords] = useState(null);
@@ -1037,7 +1120,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState([
     {
       sender: "agent",
-      text: "Hi! I am NavMind AI. How can I help you navigate today?",
+      text: "Hi! I am Nova. How can I help you navigate today?",
     },
   ]);
   const [chatInput, setChatInput] = useState("");
@@ -1045,22 +1128,21 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef(null);
 
-  const handleAgentChat = async (e) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
+  const sendToAgent = async (userMsg) => {
+    if (!userMsg.trim()) return;
 
-    const userMsg = chatInput;
     setChatMessages((prev) => [...prev, { sender: "user", text: userMsg }]);
-    setChatInput("");
     setIsAgentTyping(true);
 
     try {
       const payload = {
         user_prompt: userMsg,
-        current_lat: currentCoords?.lat || 34.0522,
-        current_lng: currentCoords?.lng || -118.2437,
+        current_lat: coordsRef.current?.lat || 34.0522,
+        current_lng: coordsRef.current?.lng || -118.2437,
       };
-      const res = await axios.post(`${API_URL}/agent/chat`, payload);
+      const res = await axios.post(`${API_URL}/agent/chat`, payload, {
+        timeout: 15000 // 15 second timeout to prevent infinite hang
+      });
       const agentData = res.data;
 
       setChatMessages((prev) => [
@@ -1071,6 +1153,10 @@ function App() {
           route_data: agentData.route_data,
         },
       ]);
+      
+      if ('speechSynthesis' in window) {
+        speakAsNova(stripMarkdownForSpeech(agentData.response));
+      }
     } catch (err) {
       setChatMessages((prev) => [
         ...prev,
@@ -1079,12 +1165,24 @@ function App() {
           text: "Sorry, I encountered an error connecting to the AI.",
         },
       ]);
+      if ('speechSynthesis' in window) {
+        speakAsNova("Sorry, I encountered an error connecting to the AI.");
+      }
     } finally {
       setIsAgentTyping(false);
     }
   };
 
-  // ── Voice Recognition ─────────────────────────────────────────
+  const handleAgentChat = async (e) => {
+    e.preventDefault();
+    const msg = chatInput;
+    setChatInput("");
+    await sendToAgent(msg);
+  };
+
+  // ── Voice Recognition (Continuous Push-to-Talk) ───────────────────────────
+  const isListeningRef = useRef(false);
+
   const toggleVoice = () => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1092,25 +1190,149 @@ function App() {
       alert("Voice recognition is not supported in this browser. Please use Chrome or Edge.");
       return;
     }
+    
     if (isListening) {
+      isListeningRef.current = false;
       recognitionRef.current?.stop();
       setIsListening(false);
       return;
     }
+    
+    setIsListening(true);
+    isListeningRef.current = true;
+    
     const recognition = new SpeechRecognition();
     recognition.lang = "en-US";
+    recognition.continuous = true; // Stay on after speaking!
     recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setChatInput(transcript);
+    
+    recognition.onresult = async (event) => {
+      if (window.isNovaSpeaking) return; // Prevent Nova from hearing herself
+      
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
+      if (transcript.trim().length > 0) {
+        setChatInput("");
+        await sendToAgent(transcript);
+      }
     };
+    
+    recognition.onend = () => {
+      if (isListeningRef.current) {
+        setTimeout(() => {
+          try { recognition.start(); } catch(e){}
+        }, 100);
+      } else {
+        setIsListening(false);
+      }
+    };
+    
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        isListeningRef.current = false;
+        setIsListening(false);
+      }
+    };
+    
     recognitionRef.current = recognition;
     recognition.start();
   };
+
+  // ── Background Wake Word "Nova" ─────────────────────────────────────────
+  const [isWakeWordActive, setIsWakeWordActive] = useState(false);
+  const wakeWordRecognitionRef = useRef(null);
+  const novaAwakeRef = useRef(false);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    if (isWakeWordActive) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+      
+      recognition.onstart = () => console.log("Wake word listener started");
+      
+      recognition.onresult = async (event) => {
+        if (window.isNovaSpeaking) return; // Prevent Nova from hearing herself
+        
+        const lastResultIndex = event.results.length - 1;
+        const transcript = event.results[lastResultIndex][0].transcript.toLowerCase();
+        
+        // If Nova is already awake, treat this as the command
+        if (novaAwakeRef.current) {
+           novaAwakeRef.current = false; // reset
+           if (transcript.trim().length > 0) {
+              setIsChatOpen(true);
+              setChatInput("");
+              await sendToAgent(transcript);
+           }
+           return;
+        }
+
+        if (transcript.includes("nova") || transcript.includes("hey nova")) {
+          setIsChatOpen(true);
+          
+          let command = transcript;
+          const wakeWordIndex = command.lastIndexOf("nova");
+          if (wakeWordIndex !== -1) {
+             command = command.substring(wakeWordIndex + 4).trim();
+          }
+          
+          if (command.length > 0) {
+             setChatInput("");
+             await sendToAgent(command);
+          } else {
+             // Wake up and wait for the next command
+             novaAwakeRef.current = true;
+             if ('speechSynthesis' in window) {
+               speakAsNova("Yes?");
+             }
+             
+             // Put her back to sleep after 8 seconds if nothing is said
+             setTimeout(() => {
+                novaAwakeRef.current = false;
+             }, 8000);
+          }
+        }
+      };
+      
+      recognition.onend = () => {
+         if (isWakeWordActive) {
+            setTimeout(() => {
+               try {
+                  wakeWordRecognitionRef.current?.start();
+               } catch (e) {}
+            }, 100);
+         }
+      };
+
+      recognition.onerror = (e) => {
+         if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            setIsWakeWordActive(false);
+         }
+         // Ignore other errors (like no-speech) to let onend naturally restart it
+      };
+      
+      wakeWordRecognitionRef.current = recognition;
+      try {
+         recognition.start();
+      } catch (e) {}
+    } else {
+      if (wakeWordRecognitionRef.current) {
+         wakeWordRecognitionRef.current.stop();
+         wakeWordRecognitionRef.current = null;
+      }
+    }
+    
+    return () => {
+      if (wakeWordRecognitionRef.current) {
+         wakeWordRecognitionRef.current.stop();
+      }
+    };
+  }, [isWakeWordActive]);
 
   // ── Geolocation ───────────────────────────────────────────────────────────
   const GEO_OPTIONS = {
@@ -1290,19 +1512,60 @@ function App() {
         <div className="app-header__brand">
           <h1>NavMind AI</h1>
         </div>
-        <button
-          onClick={toggleDarkMode}
-          className="theme-toggle"
-          aria-label="Toggle dark mode"
-        >
-          {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          <button
+            onClick={() => setIsWakeWordActive(!isWakeWordActive)}
+            className={`btn-start-nav ${isWakeWordActive ? "active" : ""}`}
+            style={{ 
+              background: isWakeWordActive ? "rgba(79, 70, 229, 0.15)" : "transparent",
+              color: isWakeWordActive ? "var(--primary-color)" : "var(--text-muted)",
+              border: `1px solid ${isWakeWordActive ? "var(--primary-color)" : "var(--border-color)"}`,
+              fontSize: "0.8rem",
+              padding: "6px 12px",
+              borderRadius: "20px"
+            }}
+            title="Enable continuous background listening for 'Hey Nova'"
+          >
+            {isWakeWordActive ? <Mic size={16} style={{ display: "inline", marginRight: 6 }} /> : <MicOff size={16} style={{ display: "inline", marginRight: 6 }} />}
+            {isWakeWordActive ? "Nova is Listening" : "Wake Word Off"}
+          </button>
+
+          <button
+            onClick={toggleDarkMode}
+            className="theme-toggle"
+            aria-label="Toggle dark mode"
+          >
+            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+        </div>
       </header>
 
       <main className={`dashboard ${!hasAnalyzed ? "dashboard--hero" : ""}`}>
+        {/* ── HERO COPY ── */}
+        {!hasAnalyzed && (
+          <div style={{
+            textAlign: "center", color: "white", maxWidth: 540,
+            animation: "fadeInUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards",
+            display: "flex", flexDirection: "column", gap: 12
+          }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: "0 auto", padding: "6px 14px", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 999, fontSize: "0.75rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", backdropFilter: "blur(10px)" }}>
+              <Zap size={14} color="#a78bfa" /> NavMind OS 2.0
+            </div>
+            <h2 style={{ fontSize: "3.5rem", fontWeight: 900, margin: 0, lineHeight: 1.1, letterSpacing: "-0.03em", textShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
+              Drive <span style={{ color: "#a78bfa" }}>Smarter.</span>
+            </h2>
+            <p style={{ fontSize: "1.1rem", opacity: 0.85, margin: 0, lineHeight: 1.5, textShadow: "0 2px 10px rgba(0,0,0,0.5)", fontWeight: 400 }}>
+              AI-powered predictions, live incident scanning, and eco-routing. Your autonomous co-pilot for the road ahead.
+            </p>
+          </div>
+        )}
+
         {/* ── INPUT PANEL ── */}
-        <section className="card input-panel">
-          <h2>Route Analysis</h2>
+        <section 
+          className="card input-panel" 
+          style={!hasAnalyzed ? { padding: "32px 36px", borderRadius: 24, background: "var(--card-bg)" } : {}}
+        >
+          {hasAnalyzed && <h2>Route Analysis</h2>}
 
           {/* Quick Saves / Recent Routes */}
           {recentRoutes.length > 0 && !hasAnalyzed && (
@@ -1452,31 +1715,34 @@ function App() {
           )}
 
           {/* Quick stats summary when results are loaded */}
-          {routeOptions && (
-            <div className="result-summary">
-              <div className="result-summary__item">
-                <span className="result-summary__num">
-                  {routeOptions.length}
-                </span>
-                <span className="result-summary__lbl">Routes</span>
+          {routeOptions && (() => {
+            const minRisk = (Math.min(...routeOptions.map(r => r.probability)) * 100).toFixed(0);
+            const minDist = Math.min(...routeOptions.map(r => r.distance));
+            const minEta = Math.min(...routeOptions.map(r => r.duration + r.traffic_delay)).toFixed(0);
+            const minCo2 = Math.min(...routeOptions.map(r => r.co2_emission));
+            return (
+              <div className="result-summary" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginTop: 14 }}>
+                {[
+                  { num: routeOptions.length, lbl: "Routes Found", icon: "🛣️", color: "#4f46e5" },
+                  { num: `${minRisk}%`, lbl: "Best Risk", icon: "🎯", color: minRisk < 40 ? "#059669" : minRisk <= 70 ? "#d97706" : "#dc2626" },
+                  { num: `${minEta} min`, lbl: "Fastest", icon: "⚡", color: "#0891b2" },
+                  { num: `${minCo2} kg`, lbl: "Lowest CO₂", icon: "🌱", color: "#059669" },
+                ].map(({ num, lbl, icon, color }) => (
+                  <div key={lbl} style={{
+                    padding: "10px 8px", borderRadius: 10,
+                    background: `linear-gradient(135deg, ${color}12, ${color}04)`,
+                    border: `1px solid ${color}30`,
+                    textAlign: "center",
+                    display: "flex", flexDirection: "column", justifyContent: "center"
+                  }}>
+                    <div style={{ fontSize: "1.1rem", marginBottom: 2 }}>{icon}</div>
+                    <div style={{ fontSize: "1.05rem", fontWeight: 800, color, lineHeight: 1.1 }}>{num}</div>
+                    <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 2 }}>{lbl}</div>
+                  </div>
+                ))}
               </div>
-              <div className="result-summary__item">
-                <span className="result-summary__num">
-                  {(
-                    Math.min(...routeOptions.map((r) => r.probability)) * 100
-                  ).toFixed(0)}
-                  %
-                </span>
-                <span className="result-summary__lbl">Best Risk</span>
-              </div>
-              <div className="result-summary__item">
-                <span className="result-summary__num">
-                  {Math.min(...routeOptions.map((r) => r.distance))} km
-                </span>
-                <span className="result-summary__lbl">Shortest</span>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           <EcoProfile co2Saved={totalCO2Saved} onReset={resetCo2} />
         </section>
@@ -1514,65 +1780,115 @@ function App() {
           )}
 
           {/* PREDICTION */}
-          {prediction && (
-            <section className="card prediction-panel">
-              <h2>
-                <CheckCircle size={20} /> Prediction
-              </h2>
-              <div className="prediction-content">
-                <div
-                  className={`status-badge ${prediction.prediction === 1 ? "high-risk" : "low-risk"}`}
-                >
-                  {prediction.prediction === 1
-                    ? "⚠ Congestion Likely"
-                    : "✓ Traffic Clear"}
-                </div>
-                <div className="metric">
-                  <span>Probability:</span>
-                  <strong>{(prediction.probability * 100).toFixed(1)}%</strong>
-                </div>
-                <div className="metric">
-                  <span>Best Model:</span>
-                  <strong>{prediction.best_model?.replace(/_/g, " ")}</strong>
-                </div>
-                {weather && (
-                  <div className="metric">
-                    <span>Weather:</span>
-                    <strong style={{ textTransform: "capitalize" }}>
-                      {weather}
-                    </strong>
+          {prediction && (() => {
+            const pct = (prediction.probability * 100).toFixed(1);
+            const isHigh = prediction.prediction === 1;
+            const ringColor = isHigh
+              ? `conic-gradient(#dc2626 0% ${pct}%, var(--border-color) ${pct}% 100%)`
+              : `conic-gradient(#059669 0% ${pct}%, var(--border-color) ${pct}% 100%)`;
+            return (
+              <section className="card prediction-panel">
+                <h2 style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                  <CheckCircle size={20} color={isHigh ? "#dc2626" : "#059669"} /> AI Traffic Prediction
+                </h2>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "24px", flexWrap: "wrap" }}>
+                  {/* Donut Ring */}
+                  <div style={{ position: "relative", width: 120, height: 120, flexShrink: 0 }}>
+                    <div style={{
+                      width: 120, height: 120, borderRadius: "50%",
+                      background: ringColor,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      <div style={{
+                        width: 84, height: 84, borderRadius: "50%",
+                        background: "var(--card-bg)",
+                        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <span style={{ fontSize: "1.35rem", fontWeight: 800, color: isHigh ? "#dc2626" : "#059669", lineHeight: 1 }}>{pct}%</span>
+                        <span style={{ fontSize: "0.6rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Risk</span>
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
-            </section>
-          )}
+
+                  {/* Stats */}
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{
+                      display: "inline-flex", alignItems: "center", gap: 8,
+                      padding: "6px 14px", borderRadius: 999,
+                      background: isHigh ? "rgba(220,38,38,0.1)" : "rgba(5,150,105,0.1)",
+                      border: `1px solid ${isHigh ? "rgba(220,38,38,0.4)" : "rgba(5,150,105,0.4)"}`,
+                      marginBottom: 14,
+                    }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: isHigh ? "#dc2626" : "#059669", animation: "pulse 1.5s infinite" }} />
+                      <span style={{ fontWeight: 700, fontSize: "0.85rem", color: isHigh ? "#dc2626" : "#059669" }}>
+                        {isHigh ? "⚠ Congestion Likely" : "✓ Traffic Clear"}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div className="metric">
+                        <span>AI Model:</span>
+                        <strong style={{ fontFamily: "monospace", fontSize: "0.78rem", color: "var(--primary-color)" }}>{prediction.best_model?.replace(/_/g, " ")}</strong>
+                      </div>
+                      {weather && (
+                        <div className="metric">
+                          <span>Live Weather:</span>
+                          <strong style={{ textTransform: "capitalize" }}>{weather}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* RECOMMENDATION */}
-          {recommendation && (
-            <section className="card recommendation-panel">
-              <h2>
-                <Clock size={20} /> Departure Timing
-              </h2>
-              <div className="metric">
-                <span>Best Departure Time:</span>
-                <strong>{recommendation.recommended_hour}:00</strong>
-              </div>
-              <div className="metric">
-                <span>Lowest Probability:</span>
-                <strong>
-                  {(recommendation.lowest_probability * 100).toFixed(1)}%
-                </strong>
-              </div>
-              <div className="metric">
-                <span>Risk Level:</span>
-                <strong
-                  className={`risk-${recommendation.risk_level.toLowerCase()}`}
-                >
-                  {recommendation.risk_level}
-                </strong>
-              </div>
-            </section>
-          )}
+          {recommendation && (() => {
+            const bestHour = recommendation.recommended_hour;
+            const bestPct = (recommendation.lowest_probability * 100).toFixed(1);
+            const riskLevel = recommendation.risk_level?.toLowerCase() || "low";
+            const riskColors = { low: "#059669", medium: "#d97706", high: "#dc2626" };
+            const riskColor = riskColors[riskLevel] || "#059669";
+            return (
+              <section className="card recommendation-panel">
+                <h2 style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+                  <Clock size={20} color={riskColor} /> Optimal Departure
+                </h2>
+
+                {/* Big time display */}
+                <div style={{
+                  textAlign: "center",
+                  padding: "20px 16px",
+                  borderRadius: 12,
+                  background: `linear-gradient(135deg, ${riskColor}15 0%, ${riskColor}05 100%)`,
+                  border: `1px solid ${riskColor}35`,
+                  marginBottom: 16,
+                }}>
+                  <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--text-muted)", marginBottom: 4 }}>Best Time to Leave</div>
+                  <div style={{ fontSize: "2.4rem", fontWeight: 900, color: riskColor, lineHeight: 1.1 }}>
+                    {bestHour}:00
+                  </div>
+                  <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginTop: 4 }}>
+                    {bestHour < 12 ? `${bestHour} AM` : bestHour === 12 ? "12 PM" : `${bestHour - 12} PM`}
+                  </div>
+                </div>
+
+                {/* Stats row */}
+                <div style={{ display: "flex", gap: 12 }}>
+                  <div style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "var(--bg-color)", border: "1px solid var(--border-color)", textAlign: "center" }}>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 800, color: riskColor }}>{bestPct}%</div>
+                    <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Congestion Risk</div>
+                  </div>
+                  <div style={{ flex: 1, padding: "10px 12px", borderRadius: 8, background: "var(--bg-color)", border: "1px solid var(--border-color)", textAlign: "center" }}>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 800, color: riskColor, textTransform: "capitalize" }}>{riskLevel}</div>
+                    <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Risk Level</div>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* AI INSIGHTS / XAI */}
           {routeExplanation && (
@@ -1643,41 +1959,52 @@ function App() {
             </section>
           )}
 
-          {/* LEGACY XAI BAR CHART - Key Factors */}
-          {explanation && !routeExplanation && (
-            <section className="card explanation-panel">
-              <h2>
-                <Info size={20} /> Key Factors
-              </h2>
-              <div className="metric highlight">
-                <span>Top Factor:</span>
-                <strong>{explanation.top_factor.replace(/_/g, " ")}</strong>
-              </div>
-              <div className="chart-container-small">
-                <ResponsiveContainer width="100%" height={150}>
-                  <BarChart
-                    data={featureData}
-                    layout="vertical"
-                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                  >
-                    <XAxis type="number" hide />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={85}
-                      tick={{ fontSize: 11, fill: "var(--text-color)" }}
-                    />
-                    <Tooltip cursor={{ fill: "transparent" }} />
-                    <Bar
-                      dataKey="importance"
-                      fill="var(--primary-color)"
-                      radius={[0, 4, 4, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-          )}
+          {/* KEY FACTORS (XAI) */}
+          {explanation && !routeExplanation && (() => {
+            const factors = Object.entries(explanation.feature_importance || {})
+              .sort(([,a],[,b]) => b - a)
+              .slice(0, 4);
+            const maxVal = factors[0]?.[1] || 1;
+            const icons = { traffic_delay: "🚦", hour: "🕐", weather: "🌦", day_of_week: "📅" };
+            const factorColors = ["#4f46e5", "#7c3aed", "#0891b2", "#059669"];
+            return (
+              <section className="card explanation-panel">
+                <h2 style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <Info size={20} color="var(--primary-color)" /> Key Traffic Factors
+                </h2>
+                <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: 18, lineHeight: 1.5 }}>
+                  Drivers behind the current traffic prediction, ranked by AI model importance.
+                </p>
+                <div style={{ padding: "10px 14px", borderRadius: 10, marginBottom: 16, background: "linear-gradient(135deg, rgba(79,70,229,0.12), rgba(79,70,229,0.04))", border: "1px solid rgba(79,70,229,0.3)", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: "1.5rem" }}>{icons[explanation.top_factor] || "📊"}</span>
+                  <div>
+                    <div style={{ fontSize: "0.7rem", textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-muted)" }}>Top Factor</div>
+                    <div style={{ fontWeight: 700, fontSize: "0.92rem", color: "var(--primary-color)" }}>{explanation.top_factor?.replace(/_/g, " ")}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {factors.map(([key, val], i) => {
+                    const pct = ((val / maxVal) * 100).toFixed(0);
+                    return (
+                      <div key={key}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 600, display: "flex", gap: 6, alignItems: "center" }}>
+                            <span>{icons[key] || "📊"}</span>{key.replace(/_/g, " ")}
+                          </span>
+                          <span style={{ fontSize: "0.72rem", color: factorColors[i % factorColors.length], fontWeight: 700 }}>{pct}%</span>
+                        </div>
+                        <div style={{ height: 7, borderRadius: 4, background: "var(--border-color)" }}>
+                          <div style={{ height: "100%", borderRadius: 4, width: `${pct}%`, background: `linear-gradient(90deg, ${factorColors[i % factorColors.length]}, ${factorColors[i % factorColors.length]}99)`, transition: "width 1.2s cubic-bezier(0.4,0,0.2,1)" }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })()}
+
+
 
           {/* 12-HOUR SMART DEPARTURE FORECAST */}
           {simulation && (() => {
@@ -1801,63 +2128,133 @@ function App() {
       <button
         className="agent-fab"
         onClick={() => setIsChatOpen(!isChatOpen)}
-        aria-label="Ask NavMind AI"
+        aria-label="Ask Nova"
       >
         {isChatOpen ? <X size={24} /> : <MessageSquare size={24} />}
       </button>
 
       {isChatOpen && (
-        <div className="agent-chat-window">
-          <div className="agent-chat-header">
-            <div className="agent-chat-title">
-              <Zap size={18} color="var(--primary-color)" /> NavMind AI
+        <div className="agent-chat-window" style={{
+          background: "var(--card-bg)",
+          border: "1px solid var(--border-color)",
+          borderRadius: 18,
+          boxShadow: "0 24px 60px rgba(0,0,0,0.2)",
+          display: "flex", flexDirection: "column",
+          overflow: "hidden",
+        }}>
+          {/* Premium header */}
+          <div style={{
+            padding: "14px 18px",
+            background: "linear-gradient(135deg, var(--primary-color), #7c3aed)",
+            display: "flex", alignItems: "center", gap: 12,
+          }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: "50%",
+              background: "rgba(255,255,255,0.15)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}>
+              <Zap size={18} color="white" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, color: "white", fontSize: "0.95rem", lineHeight: 1 }}>Nova</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#4ade80", animation: "pulse 1.5s infinite" }} />
+                <span style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.75)" }}>
+                  {isListening ? "Listening..." : "AI Assistant • Online"}
+                </span>
+              </div>
             </div>
             <button
-              className="agent-chat-close"
+              style={{ background: "rgba(255,255,255,0.15)", border: "none", borderRadius: 8, padding: "6px 8px", cursor: "pointer", color: "white", display: "flex" }}
               onClick={() => setIsChatOpen(false)}
             >
-              <X size={18} />
+              <X size={16} />
             </button>
           </div>
-          <div className="agent-chat-messages">
+
+          {/* Messages */}
+          <div className="agent-chat-messages" style={{ padding: "16px", flex: 1, overflowY: "auto" }}>
             {chatMessages.map((msg, idx) => (
-              <div key={idx} className={`chat-msg chat-msg--${msg.sender}`}>
-                <ReactMarkdown>{msg.text}</ReactMarkdown>
-                {msg.route_data && (
-                  <div
-                    className="chat-msg--agent-route"
-                    onClick={() => {
-                      setRouteOptions([msg.route_data]);
-                      setRecommendedId(msg.route_data.route_id);
-                      setActiveRouteId(msg.route_data.route_id);
-                      setHasAnalyzed(true);
-                    }}
-                  >
-                    📍 View Suggested Route
+              <div key={idx} style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: msg.sender === "user" ? "flex-end" : "flex-start",
+                marginBottom: 12,
+                animation: "fadeInUp 0.25s ease",
+              }}>
+                {msg.sender === "agent" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: "50%", background: "linear-gradient(135deg,var(--primary-color),#7c3aed)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Zap size={10} color="white" />
+                    </div>
+                    <span style={{ fontSize: "0.68rem", fontWeight: 600, color: "var(--primary-color)" }}>Nova</span>
                   </div>
                 )}
+                <div className={`chat-msg chat-msg--${msg.sender}`} style={{
+                  borderRadius: msg.sender === "user" ? "18px 18px 4px 18px" : "4px 18px 18px 18px",
+                  background: msg.sender === "user" ? "linear-gradient(135deg,var(--primary-color),#7c3aed)" : "var(--bg-color)",
+                  color: msg.sender === "user" ? "white" : "var(--text-color)",
+                  border: msg.sender === "agent" ? "1px solid var(--border-color)" : "none",
+                  padding: "10px 14px", maxWidth: "88%",
+                }}>
+                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  {msg.route_data && (
+                    <div
+                      className="chat-msg--agent-route"
+                      style={{ marginTop: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(79,70,229,0.12)", border: "1px solid rgba(79,70,229,0.3)", cursor: "pointer", fontSize: "0.8rem", fontWeight: 600, color: "var(--primary-color)" }}
+                      onClick={() => {
+                        setRouteOptions([msg.route_data]);
+                        setRecommendedId(msg.route_data.route_id);
+                        setActiveRouteId(msg.route_data.route_id);
+                        setHasAnalyzed(true);
+                      }}
+                    >
+                      📍 View Route on Map →
+                    </div>
+                  )}
+                </div>
               </div>
             ))}
             {isAgentTyping && (
-              <div className="typing-indicator">
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 0" }}>
+                <div style={{ width: 20, height: 20, borderRadius: "50%", background: "linear-gradient(135deg,var(--primary-color),#7c3aed)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Zap size={10} color="white" />
+                </div>
+                <div className="typing-indicator">
+                  <div className="typing-dot"></div>
+                  <div className="typing-dot"></div>
+                  <div className="typing-dot"></div>
+                </div>
               </div>
             )}
           </div>
-          <form className="agent-chat-input-area" onSubmit={handleAgentChat}>
+
+          {/* Input area */}
+          <form className="agent-chat-input-area" onSubmit={handleAgentChat} style={{
+            padding: "12px 14px",
+            borderTop: "1px solid var(--border-color)",
+            background: "var(--card-bg)",
+            gap: 8,
+          }}>
             <input
               type="text"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
-              placeholder={isListening ? "Listening... speak now" : "Ask for a route or traffic info..."}
+              placeholder={isListening ? "🔴 Listening... speak now" : "Ask Nova anything..."}
+              style={{
+                borderRadius: 999,
+                border: isListening ? "1.5px solid var(--primary-color)" : "1.5px solid var(--border-color)",
+                transition: "border-color 0.2s",
+                padding: "10px 16px",
+              }}
             />
             <button
               type="button"
               className={`agent-chat-send mic-btn ${isListening ? "mic-btn--listening" : ""}`}
               onClick={toggleVoice}
-              title={isListening ? "Stop listening" : "Speak to NavMind AI"}
+              title={isListening ? "Stop listening" : "Speak to Nova"}
+              style={{ borderRadius: "50%", width: 38, height: 38, flexShrink: 0 }}
             >
               {isListening ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
@@ -1865,6 +2262,7 @@ function App() {
               type="submit"
               className="agent-chat-send"
               disabled={!chatInput.trim() || isAgentTyping}
+              style={{ borderRadius: "50%", width: 38, height: 38, flexShrink: 0, background: "linear-gradient(135deg,var(--primary-color),#7c3aed)", border: "none" }}
             >
               <Send size={16} />
             </button>
