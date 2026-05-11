@@ -3,10 +3,10 @@ import { Leaf, Award, TrendingDown } from "lucide-react";
 import "./EcoProfile.css";
 
 const LEVELS = [
-  { min: 0, title: "Beginner Explorer", icon: "🌱" },
-  { min: 50, title: "Eco Commuter", icon: "🌿" },
-  { min: 200, title: "Carbon Saver", icon: "🌲" },
-  { min: 500, title: "Earth Guardian", icon: "🌍" },
+  { min: 0, title: "Beginner Explorer" },
+  { min: 50, title: "Eco Commuter" },
+  { min: 200, title: "Carbon Saver" },
+  { min: 500, title: "Earth Guardian" },
 ];
 
 export default function EcoProfile({ co2Saved, onReset }) {
@@ -28,7 +28,7 @@ export default function EcoProfile({ co2Saved, onReset }) {
     <div className="eco-profile-card">
       <div className="eco-header">
         <h3><Leaf size={18} style={{marginRight: 8, color: '#10b981'}} /> Eco Dashboard</h3>
-        <span className="eco-badge">{currentLevel.icon} {currentLevel.title}</span>
+        <span className="eco-badge">{currentLevel.title}</span>
       </div>
       
       <div className="eco-stats">

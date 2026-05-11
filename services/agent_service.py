@@ -169,7 +169,7 @@ class NavigationAgent:
         # Initialize the model with the tool
         try:
             self.model = genai.GenerativeModel(
-                model_name="gemini-2.5-flash",
+                model_name="gemini-1.5-flash",
                 tools=self.tools,
                 system_instruction=(
                     "You are Nova, a highly advanced, JARVIS-like autonomous navigation assistant. "

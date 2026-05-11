@@ -104,6 +104,9 @@ const speakAsNova = (text) => {
   utterance.onend = () => { window.isNovaSpeaking = false; };
   utterance.onerror = () => { window.isNovaSpeaking = false; };
   
+  // Attach utterance to window to prevent Chrome Garbage Collection bug dropping onend event
+  window.currentNovaUtterance = utterance;
+  
   window.speechSynthesis.speak(utterance);
 };
 
@@ -191,10 +194,11 @@ function AIRecommendationMessage({ routeOptions, recommendedId, rerouteAdvice })
   return (
     <div
       style={{
-        background: `linear-gradient(135deg, ${recMeta.color}18 0%, ${recMeta.color}06 100%)`,
-        border: `1px solid ${recMeta.color}40`,
-        borderRadius: 14,
-        padding: "18px 20px",
+        background: `var(--bg-color)`,
+        border: `1px solid ${recMeta.color}60`,
+        borderLeft: `4px solid ${recMeta.color}`,
+        borderRadius: 8,
+        padding: "16px 20px",
         display: "flex",
         alignItems: "center",
         gap: 16,
@@ -207,20 +211,19 @@ function AIRecommendationMessage({ routeOptions, recommendedId, rerouteAdvice })
       {/* Nova AI badge */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8, flexShrink: 0,
-        padding: "8px 14px", borderRadius: 999,
-        background: `${recMeta.color}22`, border: `1px solid ${recMeta.color}50`,
+        padding: "6px 12px", borderRadius: 4,
+        background: `${recMeta.color}15`,
       }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: recMeta.color, animation: "pulse 1.5s infinite" }} />
-        <Zap size={15} color={recMeta.color} />
-        <span style={{ fontWeight: 700, fontSize: "0.82rem", color: recMeta.color }}>Nova AI</span>
+        <Zap size={14} color={recMeta.color} />
+        <span style={{ fontWeight: 600, fontSize: "0.8rem", color: recMeta.color }}>Recommended</span>
       </div>
 
       {/* Message */}
       <div style={{ flex: 1, minWidth: 200 }}>
-        <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-color)", marginBottom: 3 }}>
+        <div style={{ fontWeight: 600, fontSize: "0.95rem", color: "var(--text-color)", marginBottom: 3 }}>
           {isReroute
             ? `🔄 Rerouting to ${recMeta.label} — ${(improvement * 100).toFixed(0)}% lower congestion risk`
-            : `✨ ${recMeta.label} is your optimal route`}
+            : `${recMeta.label} is your optimal route`}
         </div>
         <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
           {recRoute.distance} km &bull; {recRoute.duration} min drive &bull; +{recRoute.traffic_delay} min delay
@@ -230,19 +233,12 @@ function AIRecommendationMessage({ routeOptions, recommendedId, rerouteAdvice })
       {/* Risk pill */}
       <div style={{
         display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0,
-        padding: "8px 16px", borderRadius: 10,
-        background: `${riskColor}12`, border: `1px solid ${riskColor}35`,
+        padding: "8px 16px", borderRadius: 6,
+        background: `var(--bg-color)`, border: `1px solid var(--border-color)`,
       }}>
-        <span style={{ fontSize: "1.1rem", fontWeight: 800, color: riskColor }}>{(recRoute.probability * 100).toFixed(0)}%</span>
+        <span style={{ fontSize: "1.05rem", fontWeight: 700, color: riskColor }}>{(recRoute.probability * 100).toFixed(0)}%</span>
         <span style={{ fontSize: "0.62rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-muted)" }}>Risk</span>
       </div>
-
-      {/* Route colour chip */}
-      <div style={{
-        width: 12, height: 40, borderRadius: 6,
-        background: `linear-gradient(180deg, ${recMeta.color}, ${recMeta.color}66)`,
-        flexShrink: 0,
-      }} />
     </div>
   );
 }
@@ -1723,20 +1719,20 @@ function App() {
             return (
               <div className="result-summary" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginTop: 14 }}>
                 {[
-                  { num: routeOptions.length, lbl: "Routes Found", icon: "🛣️", color: "#4f46e5" },
-                  { num: `${minRisk}%`, lbl: "Best Risk", icon: "🎯", color: minRisk < 40 ? "#059669" : minRisk <= 70 ? "#d97706" : "#dc2626" },
-                  { num: `${minEta} min`, lbl: "Fastest", icon: "⚡", color: "#0891b2" },
-                  { num: `${minCo2} kg`, lbl: "Lowest CO₂", icon: "🌱", color: "#059669" },
+                  { num: routeOptions.length, lbl: "Routes Found", icon: <Route size={18} />, color: "#4f46e5" },
+                  { num: `${minRisk}%`, lbl: "Best Risk", icon: <CheckCircle size={18} />, color: minRisk < 40 ? "#059669" : minRisk <= 70 ? "#d97706" : "#dc2626" },
+                  { num: `${minEta} min`, lbl: "Fastest", icon: <Zap size={18} />, color: "#0891b2" },
+                  { num: `${minCo2} kg`, lbl: "Lowest CO₂", icon: <Leaf size={18} />, color: "#059669" },
                 ].map(({ num, lbl, icon, color }) => (
                   <div key={lbl} style={{
-                    padding: "10px 8px", borderRadius: 10,
-                    background: `linear-gradient(135deg, ${color}12, ${color}04)`,
-                    border: `1px solid ${color}30`,
+                    padding: "10px 8px", borderRadius: 8,
+                    background: `var(--bg-color)`,
+                    border: `1px solid var(--border-color)`,
                     textAlign: "center",
                     display: "flex", flexDirection: "column", justifyContent: "center"
                   }}>
-                    <div style={{ fontSize: "1.1rem", marginBottom: 2 }}>{icon}</div>
-                    <div style={{ fontSize: "1.05rem", fontWeight: 800, color, lineHeight: 1.1 }}>{num}</div>
+                    <div style={{ color, marginBottom: 4 }}>{icon}</div>
+                    <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-color)", lineHeight: 1.1 }}>{num}</div>
                     <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 2 }}>{lbl}</div>
                   </div>
                 ))}
