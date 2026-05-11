@@ -96,7 +96,7 @@ NavMind-AI/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/sanjanaa294/NavMind-AI.git
+git clone https://github.com/preethu2896/NavMind-AI.git
 cd NavMind-AI
 ```
 
@@ -238,5 +238,5 @@ This project was developed as part of an internship at **Inventeron Technologies
 ---
 
 <div align="center">
-Built with ❤️ by <a href="https://github.com/sanjanaa294">sanjanaa294</a>
+Built with ❤️ by <a href="https://github.com/preethu2896">preethu2896</a>
 </div>
