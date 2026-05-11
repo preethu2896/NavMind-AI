@@ -238,5 +238,5 @@ This project was developed as part of an internship at **Inventeron Technologies
 ---
 
 <div align="center">
-Built with ❤️ by <a href="https://github.com/preethu2896">preethu2896</a>
+Built with ❤️ by <a href="https://github.com/preethu2896">preethu2896</a> and <a href="https://github.com/sanjanaa294">sanjanaa294</a>
 </div>
