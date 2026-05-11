@@ -21,9 +21,11 @@
 |---|---|
 | 🗺️ **Real-Time Traffic** | Live congestion data via TomTom & OpenRouteService APIs |
 | 🤖 **AI Route Recommendations** | ML-powered optimal route suggestions (Car, Bike, Walk) |
+| 🌱 **Eco-Friendly Routing** | Real-time CO2 emission estimation and eco-profiles |
+| ⚠️ **Live Incidents** | Real-time visualization of traffic incidents and hazards |
 | 🔮 **Smart Departure** | 12-hour predictive congestion forecasting |
 | 🧠 **XAI Explanations** | Human-readable AI insights powered by Gemini |
-| 🎙️ **Voice Agent** | Voice-activated navigation assistant |
+| 🎙️ **Conversational AI Agent** | Continuous-listening voice assistant with Markdown-formatted chat |
 | 🌦️ **Weather Overlays** | Interactive weather radar via OpenWeather API |
 | 📍 **Recent Routes** | Persistent route history storage |
 | 🚦 **Traffic Simulation** | Scenario-based traffic flow simulation |
@@ -94,7 +96,7 @@ NavMind-AI/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/preethu2896/NavMind-AI.git
+git clone https://github.com/sanjanaa294/NavMind-AI.git
 cd NavMind-AI
 ```
 
@@ -236,5 +238,5 @@ This project was developed as part of an internship at **Inventeron Technologies
 ---
 
 <div align="center">
-Built with ❤️ by <a href="https://github.com/preethu2896">preethu2896</a>
+Built with ❤️ by <a href="https://github.com/sanjanaa294">sanjanaa294</a>
 </div>
