@@ -1179,6 +1179,48 @@ function App() {
   // ── Voice Recognition (Continuous Push-to-Talk) ───────────────────────────
   const isListeningRef = useRef(false);
 
+  const startListening = () => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    
+    recognition.onresult = async (event) => {
+      if (window.isNovaSpeaking) return; // Prevent Nova from hearing herself
+      
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
+      if (transcript.trim().length > 0) {
+        setChatInput("");
+        await sendToAgent(transcript);
+      }
+    };
+    
+    recognition.onend = () => {
+      if (isListeningRef.current) {
+        setTimeout(() => {
+          startListening();
+        }, 100);
+      } else {
+        setIsListening(false);
+      }
+    };
+    
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        isListeningRef.current = false;
+        setIsListening(false);
+      }
+    };
+    
+    recognitionRef.current = recognition;
+    try { recognition.start(); } catch(e){}
+  };
+
   const toggleVoice = () => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1196,42 +1238,7 @@ function App() {
     
     setIsListening(true);
     isListeningRef.current = true;
-    
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.continuous = true; // Stay on after speaking!
-    recognition.interimResults = false;
-    
-    recognition.onresult = async (event) => {
-      if (window.isNovaSpeaking) return; // Prevent Nova from hearing herself
-      
-      const last = event.results.length - 1;
-      const transcript = event.results[last][0].transcript;
-      if (transcript.trim().length > 0) {
-        setChatInput("");
-        await sendToAgent(transcript);
-      }
-    };
-    
-    recognition.onend = () => {
-      if (isListeningRef.current) {
-        setTimeout(() => {
-          try { recognition.start(); } catch(e){}
-        }, 100);
-      } else {
-        setIsListening(false);
-      }
-    };
-    
-    recognition.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        isListeningRef.current = false;
-        setIsListening(false);
-      }
-    };
-    
-    recognitionRef.current = recognition;
-    recognition.start();
+    startListening();
   };
 
   // ── Background Wake Word "Nova" ─────────────────────────────────────────
@@ -1243,7 +1250,11 @@ function App() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
-    if (isWakeWordActive) {
+    let isEffectActive = isWakeWordActive;
+
+    const startWakeWordListening = () => {
+      if (!isEffectActive) return;
+
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = false;
@@ -1296,11 +1307,9 @@ function App() {
       };
       
       recognition.onend = () => {
-         if (isWakeWordActive) {
+         if (isEffectActive) {
             setTimeout(() => {
-               try {
-                  wakeWordRecognitionRef.current?.start();
-               } catch (e) {}
+               startWakeWordListening();
             }, 100);
          }
       };
@@ -1308,6 +1317,7 @@ function App() {
       recognition.onerror = (e) => {
          if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
             setIsWakeWordActive(false);
+            isEffectActive = false;
          }
          // Ignore other errors (like no-speech) to let onend naturally restart it
       };
@@ -1316,6 +1326,10 @@ function App() {
       try {
          recognition.start();
       } catch (e) {}
+    };
+
+    if (isWakeWordActive) {
+      startWakeWordListening();
     } else {
       if (wakeWordRecognitionRef.current) {
          wakeWordRecognitionRef.current.stop();
@@ -1324,6 +1338,7 @@ function App() {
     }
     
     return () => {
+      isEffectActive = false;
       if (wakeWordRecognitionRef.current) {
          wakeWordRecognitionRef.current.stop();
       }

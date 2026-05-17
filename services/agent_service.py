@@ -1,5 +1,6 @@
 import logging
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from core.config import settings
 from services.maps_service import MapsService
 from services.model_manager import ModelManager
@@ -9,8 +10,9 @@ logger = logging.getLogger("smart_traffic")
 
 class NavigationAgent:
     def __init__(self):
+        self.client = None
         if settings.GEMINI_API_KEY:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
+            self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         else:
             logger.warning("GEMINI_API_KEY is not set.")
             
@@ -164,44 +166,66 @@ class NavigationAgent:
                 logger.error(f"Error in Agent get_live_incidents: {e}")
                 return {"error": str(e)}
 
-        self.tools = [find_route, analyze_traffic_causes, get_best_departure_time, get_live_incidents]
+        def get_current_weather(origin_lat: float, origin_lng: float) -> dict:
+            """
+            Fetches the current weather at the given coordinates.
+            """
+            logger.info("Agent called get_current_weather")
+            try:
+                import urllib.request
+                import json
+                from core.config import settings
+                url = f"https://api.openweathermap.org/data/2.5/weather?lat={origin_lat}&lon={origin_lng}&appid={settings.OPENWEATHER_API_KEY}&units=metric"
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                desc = data["weather"][0]["description"]
+                temp = data["main"]["temp"]
+                feels_like = data["main"]["feels_like"]
+                return {"weather": f"{desc}, Temperature: {temp}°C, Feels like: {feels_like}°C"}
+            except Exception as e:
+                logger.error(f"Error in Agent get_current_weather: {e}")
+                from services.weather_service import WeatherService
+                w = WeatherService().get_weather(origin_lat, origin_lng)
+                return {"weather": w}
+
+        self.tools = [find_route, analyze_traffic_causes, get_best_departure_time, get_live_incidents, get_current_weather]
         
-        # Initialize the model with the tool
-        try:
-            self.model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
-                tools=self.tools,
-                system_instruction=(
-                    "You are Nova, a highly advanced, JARVIS-like autonomous navigation assistant. "
-                    "Your job is to help users find the best routes. You have access to powerful tools.\n"
-                    "- 'find_route': Extract the destination and call this to map a route.\n"
-                    "- 'get_best_departure_time': Call this if the user asks 'when should I leave?' or 'what time is best?'.\n"
-                    "- 'get_live_incidents': Call this if the user asks about crashes, roadworks, or specific incidents nearby.\n"
-                    "- 'analyze_traffic_causes': Call this if the user asks WHY there is traffic.\n\n"
-                    "CRITICAL FORMATTING INSTRUCTIONS:\n"
-                    "- ALWAYS use **Markdown** to structure your responses.\n"
-                    "- Use bullet points for lists and bold text for emphasis (e.g., **High Congestion**).\n"
-                    "- Mention **Eco-Friendly Routing**! If a route has low delay, mention it has a lower Carbon Footprint.\n"
-                    "- Answer concisely but dynamically. Act like a highly capable, autonomous AI.\n"
-                    "- DO NOT make up details; ONLY use the data returned by the tools."
-                )
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini model: {e}")
-            self.model = None
+        self.system_instruction = (
+            "You are Nova, a highly advanced, JARVIS-like autonomous navigation assistant. "
+            "Your job is to help users find the best routes. You have access to powerful tools.\n"
+            "- 'find_route': Extract the destination and call this to map a route.\n"
+            "- 'get_best_departure_time': Call this if the user asks 'when should I leave?' or 'what time is best?'.\n"
+            "- 'get_live_incidents': Call this if the user asks about crashes, roadworks, or specific incidents nearby.\n"
+            "- 'analyze_traffic_causes': Call this if the user asks WHY there is traffic.\n"
+            "- 'get_current_weather': Call this if the user asks about the weather.\n\n"
+            "CRITICAL FORMATTING INSTRUCTIONS:\n"
+            "- ALWAYS use **Markdown** to structure your responses.\n"
+            "- Use bullet points for lists and bold text for emphasis (e.g., **High Congestion**).\n"
+            "- Mention **Eco-Friendly Routing**! If a route has low delay, mention it has a lower Carbon Footprint.\n"
+            "- Answer concisely but dynamically. Act like a highly capable, autonomous AI.\n"
+            "- DO NOT make up details; ONLY use the data returned by the tools."
+        )
 
     def process_chat(self, user_prompt: str, current_lat: float, current_lng: float) -> dict:
         """
         Process a user prompt, allowing the LLM to call tools to resolve the query.
         """
-        if not self.model:
+        if not self.client:
             return {"error": "AI Agent is not configured. Missing API key."}
             
         self.last_fetched_route = None # Reset previous route
         
         try:
             # We must start a chat session to handle multi-turn function calling
-            chat = self.model.start_chat(enable_automatic_function_calling=True)
+            chat = self.client.chats.create(
+                model="gemini-2.5-flash",
+                config=types.GenerateContentConfig(
+                    tools=self.tools,
+                    system_instruction=self.system_instruction,
+                    temperature=0.0
+                )
+            )
             
             # Prepend context to the user's prompt so the model knows where it is
             contextual_prompt = (
